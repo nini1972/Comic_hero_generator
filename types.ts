@@ -47,7 +47,8 @@ export const LANGUAGES = [
   { code: 'ru-RU', name: 'Russian (Russia)' },
   { code: 'ua-UA', name: 'Ukrainian (Ukraine)' },
   { code: 'vi-VN', name: 'Vietnamese (Vietnam)' },
-  { code: 'zh-CN', name: 'Chinese (China)' }
+  { code: 'zh-CN', name: 'Chinese (China)' },
+  { code: 'tlh-Latn', name: 'Klingon' }
 ];
 
 export interface ComicFace {
