@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import jsPDF from 'jspdf';
 import { MAX_STORY_PAGES, BACK_COVER_PAGE, TOTAL_PAGES, INITIAL_PAGES, BATCH_SIZE, DECISION_PAGES, GENRES, TONES, LANGUAGES, ComicFace, Beat, Persona } from './types';
@@ -14,9 +14,11 @@ import { useApiKey } from './useApiKey';
 import { ApiKeyDialog } from './ApiKeyDialog';
 
 // --- Constants ---
+// --- Constants ---
 const MODEL_V3 = "gemini-3-pro-image-preview";
-const MODEL_IMAGE_GEN_NAME = MODEL_V3;
 const MODEL_TEXT_NAME = MODEL_V3;
+const MODEL_IMAGE_GEN_NAME = MODEL_V3;
+const MODEL_AUDIO_NAME = "gemini-2.5-flash-preview-tts";
 
 const App: React.FC = () => {
     // --- API Key Hook ---
@@ -29,6 +31,7 @@ const App: React.FC = () => {
     const [customPremise, setCustomPremise] = useState("");
     const [storyTone, setStoryTone] = useState(TONES[0]);
     const [richMode, setRichMode] = useState(true);
+    const [narrationEnabled, setNarrationEnabled] = useState(true);
 
     const heroRef = useRef<Persona | null>(null);
     const friendRef = useRef<Persona | null>(null);
@@ -39,6 +42,7 @@ const App: React.FC = () => {
     const [comicFaces, setComicFaces] = useState<ComicFace[]>([]);
     const [currentSheetIndex, setCurrentSheetIndex] = useState(0);
     const [isStarted, setIsStarted] = useState(false);
+    const [isNarrating, setIsNarrating] = useState(false);
 
     // --- Transition States ---
     const [showSetup, setShowSetup] = useState(true);
@@ -272,6 +276,88 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         }
     };
 
+    const wrapInWav = (base64Pcm: string): string => {
+        const pcmData = atob(base64Pcm);
+        const dataLength = pcmData.length;
+        const header = new ArrayBuffer(44);
+        const view = new DataView(header);
+
+        /* RIFF identifier */
+        view.setUint32(0, 0x52494646, false); // "RIFF"
+        /* file length */
+        view.setUint32(4, 36 + dataLength, true);
+        /* RIFF type */
+        view.setUint32(8, 0x57415645, false); // "WAVE"
+        /* format chunk identifier */
+        view.setUint32(12, 0x666d7420, false); // "fmt "
+        /* format chunk length */
+        view.setUint32(16, 16, true);
+        /* sample format (raw) */
+        view.setUint16(20, 1, true);
+        /* channel count */
+        view.setUint16(22, 1, true);
+        /* sample rate */
+        view.setUint32(24, 24000, true);
+        /* byte rate (sample rate * block align) */
+        view.setUint32(28, 48000, true);
+        /* block align (channel count * bytes per sample) */
+        view.setUint16(32, 2, true);
+        /* bits per sample */
+        view.setUint16(34, 16, true);
+        /* data chunk identifier */
+        view.setUint32(36, 0x64617461, false); // "data"
+        /* data chunk length */
+        view.setUint32(40, dataLength, true);
+
+        const headerBlob = new Uint8Array(header);
+        const pcmBlob = new Uint8Array(dataLength);
+        for (let i = 0; i < dataLength; i++) {
+            pcmBlob[i] = pcmData.charCodeAt(i);
+        }
+
+        const combined = new Uint8Array(44 + dataLength);
+        combined.set(headerBlob);
+        combined.set(pcmBlob, 44);
+
+        // Convert byte array back to base64
+        let binary = '';
+        const len = combined.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
+    };
+
+    const generateAudio = async (text: string): Promise<string> => {
+        if (!text) return '';
+        try {
+            const ai = getAI();
+            const response = await ai.models.generateContent({
+                model: MODEL_AUDIO_NAME,
+                contents: [{ parts: [{ text: `Recite this comic narration with an expressive, dramatic voice: "${text}"` }] }],
+                config: {
+                    responseModalities: ['AUDIO'],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: {
+                                voiceName: 'Kore' // Options: Kore, Charon, Aoede, etc.
+                            },
+                        },
+                    },
+                },
+            });
+
+            const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (!data) return '';
+
+            // Wrap the raw 24kHz PCM data in a WAV container for the browser
+            return wrapInWav(data);
+        } catch (e) {
+            console.error("Audio generation failed", e);
+            return '';
+        }
+    };
+
     const updateFaceState = (id: string, updates: Partial<ComicFace>) => {
         setComicFaces(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
         const idx = historyRef.current.findIndex(f => f.id === id);
@@ -298,9 +384,52 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         }
 
         updateFaceState(faceId, { narrative: beat, choices: beat.choices, isDecisionPage: isDecision });
+
+        // Generate Image only
         const url = await generateImage(beat, type);
         updateFaceState(faceId, { imageUrl: url, isLoading: false });
     };
+
+    // --- Narration Background Queue ---
+    useEffect(() => {
+        if (!narrationEnabled || !isStarted || isNarrating) return;
+
+        const processNextNarration = async () => {
+            const nextFace = comicFaces.find(f => 
+                f.imageUrl && 
+                (f.narrative?.caption || f.narrative?.dialogue) && 
+                !f.audioBase64 && 
+                f.type !== 'cover' && 
+                f.type !== 'back_cover'
+            );
+
+            if (nextFace) {
+                setIsNarrating(true);
+                try {
+                    console.log(`Generating narration for page ${nextFace.pageIndex}...`);
+                    
+                    const caption = nextFace.narrative?.caption || '';
+                    const dialogue = nextFace.narrative?.dialogue ? ` ${nextFace.narrative.focus_char === 'hero' ? 'The hero says: ' : 'The sidekick says: '}${nextFace.narrative.dialogue}` : '';
+                    const fullText = `${caption}${dialogue}`.trim();
+
+                    const audio = await generateAudio(fullText);
+                    if (audio) {
+                        updateFaceState(nextFace.id, { audioBase64: audio });
+                    } else {
+                        // Mark as failed to prevent infinite retry loop
+                        updateFaceState(nextFace.id, { audioBase64: 'FAILED' });
+                    }
+                } catch (e) {
+                    console.error("Narration queue error:", e);
+                    updateFaceState(nextFace.id, { audioBase64: 'FAILED' });
+                } finally {
+                    setIsNarrating(false);
+                }
+            }
+        };
+
+        processNextNarration();
+    }, [comicFaces, narrationEnabled, isStarted, isNarrating]);
 
     const generateBatch = async (startPage: number, count: number) => {
         const pagesToGen: number[] = [];
@@ -440,6 +569,8 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                 onLanguageChange={setSelectedLanguage}
                 onPremiseChange={setCustomPremise}
                 onRichModeChange={setRichMode}
+                narrationEnabled={narrationEnabled}
+                onNarrationChange={setNarrationEnabled}
                 onLaunch={launchStory}
             />
 

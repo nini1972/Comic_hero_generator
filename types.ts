@@ -61,6 +61,7 @@ export interface ComicFace {
   isLoading: boolean;
   pageIndex?: number;
   isDecisionPage?: boolean;
+  audioBase64?: string;
 }
 
 export interface Beat {
