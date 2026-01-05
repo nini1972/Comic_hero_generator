@@ -24,6 +24,7 @@ interface SetupProps {
     onRichModeChange: (val: boolean) => void;
     narrationEnabled: boolean;
     onNarrationChange: (val: boolean) => void;
+    onGenderChange: (type: 'hero' | 'friend', gender: 'male' | 'female') => void;
     onLaunch: () => void;
 }
 
@@ -116,10 +117,16 @@ export const Setup: React.FC<SetupProps> = (props) => {
                                     {props.hero ? (
                                         <div className="flex gap-3 items-center mt-1">
                                             <img src={`data:image/jpeg;base64,${props.hero.base64}`} alt="Hero Preview" className="w-20 h-20 object-cover border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,0.2)] bg-white rotate-[-2deg]" />
-                                            <label className="cursor-pointer comic-btn bg-yellow-400 text-black text-sm px-3 py-1 hover:bg-yellow-300 transition-transform active:scale-95 uppercase">
-                                                REPLACE
-                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && props.onHeroUpload(e.target.files[0])} />
-                                            </label>
+                                            <div className="flex flex-col gap-1 flex-1">
+                                                <label className="cursor-pointer comic-btn bg-yellow-400 text-black text-sm px-3 py-1 hover:bg-yellow-300 transition-transform active:scale-95 uppercase text-center block">
+                                                    REPLACE
+                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && props.onHeroUpload(e.target.files[0])} />
+                                                </label>
+                                                <div className="flex border-2 border-black divide-x-2 divide-black overflow-hidden rounded-sm h-7">
+                                                    <button onClick={() => props.onGenderChange('hero', 'male')} className={`flex-1 text-[10px] font-bold transition-colors ${props.hero.gender === 'male' ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-100'}`}>MALE</button>
+                                                    <button onClick={() => props.onGenderChange('hero', 'female')} className={`flex-1 text-[10px] font-bold transition-colors ${props.hero.gender === 'female' ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-100'}`}>FEMALE</button>
+                                                </div>
+                                            </div>
                                         </div>
                                     ) : (
                                         <label className="comic-btn bg-blue-500 text-white text-lg px-3 py-3 block w-full hover:bg-blue-400 cursor-pointer text-center">
@@ -139,10 +146,16 @@ export const Setup: React.FC<SetupProps> = (props) => {
                                     {props.friend ? (
                                         <div className="flex gap-3 items-center mt-1">
                                             <img src={`data:image/jpeg;base64,${props.friend.base64}`} alt="Co-Star Preview" className="w-20 h-20 object-cover border-2 border-black shadow-[2px_2px_0px_rgba(0,0,0,0.2)] bg-white rotate-[2deg]" />
-                                            <label className="cursor-pointer comic-btn bg-yellow-400 text-black text-sm px-3 py-1 hover:bg-yellow-300 transition-transform active:scale-95 uppercase">
-                                                REPLACE
-                                                <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && props.onFriendUpload(e.target.files[0])} />
-                                            </label>
+                                            <div className="flex flex-col gap-1 flex-1">
+                                                <label className="cursor-pointer comic-btn bg-yellow-400 text-black text-sm px-3 py-1 hover:bg-yellow-300 transition-transform active:scale-95 uppercase text-center block">
+                                                    REPLACE
+                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && props.onFriendUpload(e.target.files[0])} />
+                                                </label>
+                                                <div className="flex border-2 border-black divide-x-2 divide-black overflow-hidden rounded-sm h-7">
+                                                    <button onClick={() => props.onGenderChange('friend', 'male')} className={`flex-1 text-[10px] font-bold transition-colors ${props.friend.gender === 'male' ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-100'}`}>MALE</button>
+                                                    <button onClick={() => props.onGenderChange('friend', 'female')} className={`flex-1 text-[10px] font-bold transition-colors ${props.friend.gender === 'female' ? 'bg-pink-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-100'}`}>FEMALE</button>
+                                                </div>
+                                            </div>
                                         </div>
                                     ) : (
                                         <label className="comic-btn bg-purple-500 text-white text-lg px-3 py-3 block w-full hover:bg-purple-400 cursor-pointer text-center">

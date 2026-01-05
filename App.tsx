@@ -7,6 +7,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import jsPDF from 'jspdf';
+import JSZip from 'jszip';
 import { MAX_STORY_PAGES, BACK_COVER_PAGE, TOTAL_PAGES, INITIAL_PAGES, BATCH_SIZE, DECISION_PAGES, GENRES, TONES, LANGUAGES, ComicFace, Beat, Persona } from './types';
 import { Setup } from './Setup';
 import { Book } from './Book';
@@ -224,7 +225,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                 config: { imageConfig: { aspectRatio: '1:1' } }
             });
             const part = res.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-            if (part?.inlineData?.data) return { base64: part.inlineData.data, desc };
+            if (part?.inlineData?.data) return { base64: part.inlineData.data, desc, gender: 'female' };
             throw new Error("Failed");
         } catch (e) {
             handleAPIError(e);
@@ -328,7 +329,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         return btoa(binary);
     };
 
-    const generateAudio = async (text: string): Promise<string> => {
+    const generateAudio = async (text: string, voiceName: string = 'Kore'): Promise<string> => {
         if (!text) return '';
         try {
             const ai = getAI();
@@ -340,7 +341,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                     speechConfig: {
                         voiceConfig: {
                             prebuiltVoiceConfig: {
-                                voiceName: 'Kore' // Options: Kore, Charon, Aoede, etc.
+                                voiceName: voiceName // Options: Kore, Charon, Aoede, etc.
                             },
                         },
                     },
@@ -395,11 +396,11 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         if (!narrationEnabled || !isStarted || isNarrating) return;
 
         const processNextNarration = async () => {
-            const nextFace = comicFaces.find(f => 
-                f.imageUrl && 
-                (f.narrative?.caption || f.narrative?.dialogue) && 
-                !f.audioBase64 && 
-                f.type !== 'cover' && 
+            const nextFace = comicFaces.find(f =>
+                f.imageUrl &&
+                (f.narrative?.caption || f.narrative?.dialogue) &&
+                !f.audioBase64 &&
+                f.type !== 'cover' &&
                 f.type !== 'back_cover'
             );
 
@@ -407,12 +408,20 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                 setIsNarrating(true);
                 try {
                     console.log(`Generating narration for page ${nextFace.pageIndex}...`);
-                    
+
                     const caption = nextFace.narrative?.caption || '';
                     const dialogue = nextFace.narrative?.dialogue ? ` ${nextFace.narrative.focus_char === 'hero' ? 'The hero says: ' : 'The sidekick says: '}${nextFace.narrative.dialogue}` : '';
                     const fullText = `${caption}${dialogue}`.trim();
 
-                    const audio = await generateAudio(fullText);
+                    // Voice Selection Logic
+                    let voice = 'Kore'; // Default narrator
+                    if (nextFace.narrative?.focus_char === 'hero' && heroRef.current) {
+                        voice = heroRef.current.gender === 'male' ? 'Charon' : 'Kore';
+                    } else if (nextFace.narrative?.focus_char === 'friend' && friendRef.current) {
+                        voice = friendRef.current.gender === 'male' ? 'Charon' : 'Kore';
+                    }
+
+                    const audio = await generateAudio(fullText, voice);
                     if (audio) {
                         updateFaceState(nextFace.id, { audioBase64: audio });
                     } else {
@@ -527,20 +536,187 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         const PAGE_WIDTH = 480;
         const PAGE_HEIGHT = 720;
         const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: [PAGE_WIDTH, PAGE_HEIGHT] });
-        const pagesToPrint = comicFaces.filter(face => face.imageUrl && !face.isLoading).sort((a, b) => (a.pageIndex || 0) - (b.pageIndex || 0));
 
-        pagesToPrint.forEach((face, index) => {
-            if (index > 0) doc.addPage([PAGE_WIDTH, PAGE_HEIGHT], 'portrait');
-            if (face.imageUrl) doc.addImage(face.imageUrl, 'JPEG', 0, 0, PAGE_WIDTH, PAGE_HEIGHT);
-        });
+        const getFace = (pIdx: number) => comicFaces.find(f => f.pageIndex === pIdx && f.imageUrl && !f.isLoading);
+
+        // 1. COVER
+        const cover = getFace(0);
+        if (cover?.imageUrl) {
+            doc.addImage(cover.imageUrl, 'JPEG', 0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+        }
+
+        // 2. INTERNAL SPREADS (1-2, 3-4, ...)
+        for (let i = 1; i <= MAX_STORY_PAGES; i += 2) {
+            const left = getFace(i);
+            const right = getFace(i + 1);
+
+            if (left || right) {
+                // Add a landscape spread page
+                doc.addPage([PAGE_WIDTH * 2, PAGE_HEIGHT], 'landscape');
+                if (left?.imageUrl) doc.addImage(left.imageUrl, 'JPEG', 0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+                if (right?.imageUrl) doc.addImage(right.imageUrl, 'JPEG', PAGE_WIDTH, 0, PAGE_WIDTH, PAGE_HEIGHT);
+            }
+        }
+
+        // 3. BACK COVER
+        const backCover = getFace(BACK_COVER_PAGE);
+        if (backCover?.imageUrl) {
+            doc.addPage([PAGE_WIDTH, PAGE_HEIGHT], 'portrait');
+            doc.addImage(backCover.imageUrl, 'JPEG', 0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+        }
+
         doc.save('Infinite-Heroes-Issue.pdf');
     };
 
+    const getDigitalHtml = () => {
+        const title = `Infinite Heroes - ${selectedGenre}`;
+        const faces = comicFaces
+            .filter(f => f.imageUrl && !f.isLoading)
+            .sort((a, b) => (a.pageIndex || 0) - (b.pageIndex || 0));
+
+        const dataTemplates = faces.map((f, i) => `
+    <div class="page-data" id="data-${i}" data-audio="${f.audioBase64 !== 'FAILED' ? (f.audioBase64 || '') : ''}">
+        <img class="lazy-image" data-src="${f.imageUrl}" />
+    </div>`).join('');
+
+        return `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>${title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8">
+    <style>
+        body { background: #000; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+        .container { position: relative; width: 100%; max-width: 600px; margin-top: 5px; background: #000; display: flex; align-items: center; justify-content: center; flex: 1; }
+        #pageImage { width: 100%; height: auto; max-height: 80vh; object-fit: contain; border-bottom: 2px solid #333; }
+        .controls { width: 100%; padding: 20px; display: flex; justify-content: center; gap: 15px; background: #111; border-top: 1px solid #333; padding-bottom: env(safe-area-inset-bottom); }
+        button { background: #ff4444; color: white; border: none; padding: 12px 25px; font-size: 1.1rem; cursor: pointer; font-weight: bold; border-radius: 12px; text-transform: uppercase; -webkit-tap-highlight-color: transparent; }
+        button:active { opacity: 0.7; transform: scale(0.95); }
+        button:disabled { background: #333; color: #666; }
+        .page-info { font-size: 1rem; align-self: center; font-weight: bold; min-width: 90px; text-align: center; }
+        h1 { font-style: italic; color: #ffd700; margin: 10px 0 5px 0; font-size: 1.2rem; text-align: center; }
+        .ios-tip { font-size: 0.75rem; color: #aaa; margin: 5px 0; padding: 10px; background: #222; border-radius: 8px; margin: 0 10px 10px 10px; }
+        
+        #overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
+        #startBtn { font-size: 1.5rem; padding: 15px 40px; background: #22c55e; margin-top: 20px; }
+        .hidden-data { display: none; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <h1 style="font-size: 2rem;">${title}</h1>
+        <p>TAP BELOW TO START YOUR ADVENTURE</p>
+        <button id="startBtn">PLAY STORY</button>
+        <p style="margin-top: 20px; color: #666; font-size: 0.8rem;">(Enabled audio on mobile)</p>
+    </div>
+
+    <h1>${title}</h1>
+    <div class="ios-tip">
+        <b>iPhone Tip:</b> If images don't load, tap the <b>Share icon</b> (square with up arrow) at the top right and select <b>"Open in Safari"</b>.
+    </div>
+    
+    <div class="container">
+        <img id="pageImage" src="" />
+    </div>
+
+    <div class="controls">
+        <button id="prevBtn">BACK</button>
+        <span class="page-info">PAGE <span id="pageNum">1</span> / ${faces.length}</span>
+        <button id="nextBtn">NEXT</button>
+    </div>
+
+    <audio id="mainAudio"></audio>
+
+    <div class="hidden-data">
+        ${dataTemplates}
+    </div>
+
+    <script>
+        let currentIndex = 0;
+        const totalPages = ${faces.length};
+        const img = document.getElementById('pageImage');
+        const num = document.getElementById('pageNum');
+        const next = document.getElementById('nextBtn');
+        const prev = document.getElementById('prevBtn');
+        const audio = document.getElementById('mainAudio');
+        const overlay = document.getElementById('overlay');
+        const startBtn = document.getElementById('startBtn');
+
+        function update() {
+            const data = document.getElementById('data-' + currentIndex);
+            const sourceImg = data.querySelector('img');
+            
+            // UI Update
+            img.src = sourceImg.getAttribute('data-src');
+            num.innerText = currentIndex + 1;
+            prev.disabled = currentIndex === 0;
+            next.disabled = currentIndex === totalPages - 1;
+
+            // Audio Logic
+            audio.pause();
+            const audioData = data.getAttribute('data-audio');
+            if (audioData && audioData !== '') {
+                audio.src = 'data:audio/wav;base64,' + audioData;
+                audio.play().catch(e => console.log("Audio failed", e));
+            }
+        }
+
+        startBtn.onclick = () => {
+            overlay.style.display = 'none';
+            // Unlock audio on iOS
+            audio.play().catch(() => {});
+            update();
+        };
+
+        prev.onclick = (e) => { e.stopPropagation(); if(currentIndex > 0) { currentIndex--; update(); } };
+        next.onclick = (e) => { e.stopPropagation(); if(currentIndex < totalPages - 1) { currentIndex++; update(); } };
+
+        update(); // Early load for image
+    </script>
+</body>
+</html>
+        `;
+    };
+
+    const downloadDigitalEdition = () => {
+        const htmlContent = getDigitalHtml();
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Infinite-Heroes-Digital-Edition.html';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const downloadZipEdition = async () => {
+        const zip = new JSZip();
+        const htmlContent = getDigitalHtml();
+        zip.file("Story.html", htmlContent);
+
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Infinite-Heroes-Digital-Edition.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     const handleHeroUpload = async (file: File) => {
-        try { const base64 = await fileToBase64(file); setHero({ base64, desc: "The Main Hero" }); } catch (e) { alert("Hero upload failed"); }
+        try { const base64 = await fileToBase64(file); setHero({ base64, desc: "The Main Hero", gender: 'female' }); } catch (e) { alert("Hero upload failed"); }
     };
     const handleFriendUpload = async (file: File) => {
-        try { const base64 = await fileToBase64(file); setFriend({ base64, desc: "The Sidekick/Rival" }); } catch (e) { alert("Friend upload failed"); }
+        try { const base64 = await fileToBase64(file); setFriend({ base64, desc: "The Sidekick/Rival", gender: 'female' }); } catch (e) { alert("Friend upload failed"); }
+    };
+
+    const handleGenderChange = (personaType: 'hero' | 'friend', gender: 'male' | 'female') => {
+        if (personaType === 'hero' && hero) {
+            setHero({ ...hero, gender });
+        } else if (personaType === 'friend' && friend) {
+            setFriend({ ...friend, gender });
+        }
     };
 
     const handleSheetClick = (index: number) => {
@@ -571,6 +747,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                 onRichModeChange={setRichMode}
                 narrationEnabled={narrationEnabled}
                 onNarrationChange={setNarrationEnabled}
+                onGenderChange={handleGenderChange}
                 onLaunch={launchStory}
             />
 
@@ -583,6 +760,8 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                 onChoice={handleChoice}
                 onOpenBook={() => setCurrentSheetIndex(1)}
                 onDownload={downloadPDF}
+                onExportDigital={() => downloadDigitalEdition()}
+                onExportZip={() => downloadZipEdition()}
                 onReset={resetApp}
             />
         </div>

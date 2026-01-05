@@ -16,6 +16,8 @@ interface BookProps {
     onChoice: (pageIndex: number, choice: string) => void;
     onOpenBook: () => void;
     onDownload: () => void;
+    onExportDigital: () => void;
+    onExportZip: () => void;
     onReset: () => void;
 }
 
@@ -107,10 +109,10 @@ export const Book: React.FC<BookProps> = (props) => {
                 <div key={i} className={`paper ${i < props.currentSheetIndex ? 'flipped' : ''}`} style={{ zIndex: i < props.currentSheetIndex ? i : sheetsToRender.length - i }}
                     onClick={() => props.onSheetClick(i)}>
                     <div className="front">
-                        <Panel face={sheet.front} allFaces={props.comicFaces} onChoice={props.onChoice} onOpenBook={props.onOpenBook} onDownload={props.onDownload} onReset={props.onReset} />
+                        <Panel face={sheet.front} allFaces={props.comicFaces} onChoice={props.onChoice} onOpenBook={props.onOpenBook} onDownload={props.onDownload} onExportDigital={props.onExportDigital} onExportZip={props.onExportZip} onReset={props.onReset} />
                     </div>
                     <div className="back">
-                        <Panel face={sheet.back} allFaces={props.comicFaces} onChoice={props.onChoice} onOpenBook={props.onOpenBook} onDownload={props.onDownload} onReset={props.onReset} />
+                        <Panel face={sheet.back} allFaces={props.comicFaces} onChoice={props.onChoice} onOpenBook={props.onOpenBook} onDownload={props.onDownload} onExportDigital={props.onExportDigital} onExportZip={props.onExportZip} onReset={props.onReset} />
                     </div>
                 </div>
             ))}
