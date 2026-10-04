@@ -62,6 +62,9 @@ export interface ComicFace {
   pageIndex?: number;
   isDecisionPage?: boolean;
   audioBase64?: string;
+  captionAudio?: string;
+  dialogueAudio?: string;
+  audioStatus?: 'pending' | 'generating' | 'done' | 'failed';
 }
 
 export interface Beat {

@@ -320,7 +320,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         combined.set(headerBlob);
         combined.set(pcmBlob, 44);
 
-        // Convert byte array back to base64
+        // Convert byte array back to base64 safely
         let binary = '';
         const len = combined.byteLength;
         for (let i = 0; i < len; i++) {
@@ -329,19 +329,52 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         return btoa(binary);
     };
 
-    const generateAudio = async (text: string, voiceName: string = 'Kore'): Promise<string> => {
-        if (!text) return '';
+    const concatenatePcm = (pcm1Base64?: string, pcm2Base64?: string, pauseSeconds: number = 0.4): string => {
+        if (!pcm1Base64 && !pcm2Base64) return '';
+        if (!pcm1Base64) return pcm2Base64 || '';
+        if (!pcm2Base64) return pcm1Base64 || '';
+
+        const bin1 = atob(pcm1Base64);
+        const bin2 = atob(pcm2Base64);
+
+        // 24000 samples/sec * 2 bytes/sample * pauseSeconds
+        const silenceBytes = Math.floor(24000 * pauseSeconds) * 2;
+        const totalLength = bin1.length + silenceBytes + bin2.length;
+        const combined = new Uint8Array(totalLength);
+
+        // Copy first PCM (Caption)
+        for (let i = 0; i < bin1.length; i++) {
+            combined[i] = bin1.charCodeAt(i);
+        }
+
+        // Copy second PCM (Dialogue) after silence
+        const offset2 = bin1.length + silenceBytes;
+        for (let i = 0; i < bin2.length; i++) {
+            combined[offset2 + i] = bin2.charCodeAt(i);
+        }
+
+        let binary = '';
+        const len = combined.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
+    };
+
+    const generateAudioPcm = async (text: string, voiceName: string, promptInstruction?: string): Promise<string> => {
+        if (!text || !text.trim()) return '';
         try {
             const ai = getAI();
+            const prompt = promptInstruction ? `${promptInstruction}: "${text.trim()}"` : `Read expressively: "${text.trim()}"`;
             const response = await ai.models.generateContent({
                 model: MODEL_AUDIO_NAME,
-                contents: [{ parts: [{ text: `Recite this comic narration with an expressive, dramatic voice: "${text}"` }] }],
+                contents: [{ parts: [{ text: prompt }] }],
                 config: {
                     responseModalities: ['AUDIO'],
                     speechConfig: {
                         voiceConfig: {
                             prebuiltVoiceConfig: {
-                                voiceName: voiceName // Options: Kore, Charon, Aoede, etc.
+                                voiceName: voiceName
                             },
                         },
                     },
@@ -349,14 +382,16 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             });
 
             const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            if (!data) return '';
-
-            // Wrap the raw 24kHz PCM data in a WAV container for the browser
-            return wrapInWav(data);
+            return data || '';
         } catch (e) {
-            console.error("Audio generation failed", e);
+            console.error(`Audio PCM generation failed for voice ${voiceName}:`, e);
             return '';
         }
+    };
+
+    const generateAudio = async (text: string, voiceName: string = 'Kore'): Promise<string> => {
+        const pcm = await generateAudioPcm(text, voiceName);
+        return pcm ? wrapInWav(pcm) : '';
     };
 
     const updateFaceState = (id: string, updates: Partial<ComicFace>) => {
@@ -391,7 +426,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         updateFaceState(faceId, { imageUrl: url, isLoading: false });
     };
 
-    // --- Narration Background Queue ---
+    // --- Narration Background Queue with Multi-Voice Support ---
     useEffect(() => {
         if (!narrationEnabled || !isStarted || isNarrating) return;
 
@@ -407,30 +442,68 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             if (nextFace) {
                 setIsNarrating(true);
                 try {
-                    console.log(`Generating narration for page ${nextFace.pageIndex}...`);
+                    console.log(`Generating multi-voice narration for page ${nextFace.pageIndex}...`);
 
-                    const caption = nextFace.narrative?.caption || '';
-                    const dialogue = nextFace.narrative?.dialogue ? ` ${nextFace.narrative.focus_char === 'hero' ? 'The hero says: ' : 'The sidekick says: '}${nextFace.narrative.dialogue}` : '';
-                    const fullText = `${caption}${dialogue}`.trim();
+                    const caption = (nextFace.narrative?.caption || '').trim();
+                    const dialogue = (nextFace.narrative?.dialogue || '').trim();
+                    const focusChar = nextFace.narrative?.focus_char || 'hero';
 
-                    // Voice Selection Logic
-                    let voice = 'Kore'; // Default narrator
-                    if (nextFace.narrative?.focus_char === 'hero' && heroRef.current) {
-                        voice = heroRef.current.gender === 'male' ? 'Charon' : 'Kore';
-                    } else if (nextFace.narrative?.focus_char === 'friend' && friendRef.current) {
-                        voice = friendRef.current.gender === 'male' ? 'Charon' : 'Kore';
+                    // 1. Assign Dedicated Narrator Voice
+                    const narratorVoice = (selectedGenre === 'Classic Horror' || selectedGenre === 'Dark Sci-Fi') ? 'Charon' : 'Aoede';
+
+                    // 2. Assign Distinct Character Voice based on gender
+                    let characterVoice = 'Fenrir';
+                    if (focusChar === 'hero') {
+                        characterVoice = (heroRef.current?.gender === 'female') ? 'Kore' : 'Fenrir';
+                    } else if (focusChar === 'friend') {
+                        characterVoice = (friendRef.current?.gender === 'female') ? 'Aoede' : 'Puck';
+                    } else {
+                        characterVoice = 'Orus';
                     }
 
-                    const audio = await generateAudio(fullText, voice);
-                    if (audio) {
-                        updateFaceState(nextFace.id, { audioBase64: audio });
+                    // 3. Parallel Generation of Caption and Dialogue
+                    const [captionPcm, dialoguePcm] = await Promise.all([
+                        caption
+                            ? generateAudioPcm(
+                                caption,
+                                narratorVoice,
+                                `As a cinematic comic-book narrator, recite this scene caption with ${storyTone.toLowerCase()} drama`
+                            )
+                            : Promise.resolve(''),
+                        dialogue
+                            ? generateAudioPcm(
+                                dialogue,
+                                characterVoice,
+                                `Act as the comic character and speak this dialogue with emotional authenticity`
+                            )
+                            : Promise.resolve('')
+                    ]);
+
+                    // 4. Combine into a unified theatrical soundtrack (Narrator -> 400ms pause -> In-character Dialogue)
+                    const combinedPcm = concatenatePcm(captionPcm, dialoguePcm, 0.4);
+                    const combinedWav = combinedPcm ? wrapInWav(combinedPcm) : '';
+                    const captionWav = captionPcm ? wrapInWav(captionPcm) : undefined;
+                    const dialogueWav = dialoguePcm ? wrapInWav(dialoguePcm) : undefined;
+
+                    if (combinedWav) {
+                        updateFaceState(nextFace.id, {
+                            audioBase64: combinedWav,
+                            captionAudio: captionWav,
+                            dialogueAudio: dialogueWav,
+                            audioStatus: 'done'
+                        });
                     } else {
-                        // Mark as failed to prevent infinite retry loop
-                        updateFaceState(nextFace.id, { audioBase64: 'FAILED' });
+                        updateFaceState(nextFace.id, {
+                            audioBase64: 'FAILED',
+                            audioStatus: 'failed'
+                        });
                     }
                 } catch (e) {
                     console.error("Narration queue error:", e);
-                    updateFaceState(nextFace.id, { audioBase64: 'FAILED' });
+                    updateFaceState(nextFace.id, {
+                        audioBase64: 'FAILED',
+                        audioStatus: 'failed'
+                    });
                 } finally {
                     setIsNarrating(false);
                 }
@@ -438,7 +511,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         };
 
         processNextNarration();
-    }, [comicFaces, narrationEnabled, isStarted, isNarrating]);
+    }, [comicFaces, narrationEnabled, isStarted, isNarrating, selectedGenre, storyTone]);
 
     const generateBatch = async (startPage: number, count: number) => {
         const pagesToGen: number[] = [];
@@ -576,8 +649,13 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             .filter(f => f.imageUrl && !f.isLoading)
             .sort((a, b) => (a.pageIndex || 0) - (b.pageIndex || 0));
 
+        const escapeAttr = (str: string) => (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const dataTemplates = faces.map((f, i) => `
-    <div class="page-data" id="data-${i}" data-audio="${f.audioBase64 !== 'FAILED' ? (f.audioBase64 || '') : ''}">
+    <div class="page-data" id="data-${i}" 
+         data-audio="${f.audioBase64 !== 'FAILED' ? (f.audioBase64 || '') : ''}"
+         data-caption="${escapeAttr(f.narrative?.caption || '')}"
+         data-dialogue="${escapeAttr(f.narrative?.dialogue || '')}"
+         data-speaker="${escapeAttr(f.narrative?.focus_char === 'friend' ? 'CO-STAR' : 'HERO')}">
         <img class="lazy-image" data-src="${f.imageUrl}" />
     </div>`).join('');
 
@@ -644,6 +722,47 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         .btn-auto.active { background: #16a34a; box-shadow: 0 0 14px rgba(34, 197, 94, 0.45); }
         .page-info { font-size: 1rem; align-self: center; font-weight: bold; min-width: 90px; text-align: center; }
         h1 { font-style: italic; color: #ffd700; margin: 10px 0 5px 0; font-size: 1.2rem; text-align: center; }
+        .subtitles-box {
+            position: absolute;
+            bottom: 14px;
+            left: 14px;
+            right: 14px;
+            padding: 10px 14px;
+            background: rgba(10, 10, 10, 0.88);
+            border: 2px solid #ffd700;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            color: #fff;
+            text-align: center;
+            backdrop-filter: blur(8px);
+            z-index: 10;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        .subtitles-box .sub-caption {
+            color: #fde047;
+            font-style: italic;
+            font-size: 0.88rem;
+            margin-bottom: 4px;
+        }
+        .subtitles-box .sub-dialogue {
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 0.98rem;
+        }
+        .subtitles-box .sub-speaker {
+            display: inline-block;
+            font-size: 0.72rem;
+            background: #2563eb;
+            color: white;
+            padding: 2px 7px;
+            border-radius: 4px;
+            margin-right: 6px;
+            text-transform: uppercase;
+            font-weight: bold;
+            vertical-align: middle;
+        }
         .ios-tip { font-size: 0.75rem; color: #aaa; margin: 5px 0; padding: 10px; background: #222; border-radius: 8px; margin: 0 10px 10px 10px; }
         
         #overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
@@ -666,6 +785,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
     
     <div class="container">
         <img id="pageImage" src="" />
+        <div id="subtitlesBox" class="subtitles-box" style="display:none;"></div>
     </div>
 
     <div class="controls">
@@ -690,6 +810,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         const prev = document.getElementById('prevBtn');
         const autoBtn = document.getElementById('autoBtn');
         const audio = document.getElementById('mainAudio');
+        const subBox = document.getElementById('subtitlesBox');
         const overlay = document.getElementById('overlay');
         const startBtn = document.getElementById('startBtn');
 
@@ -736,6 +857,20 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             prev.disabled = currentIndex === 0;
             next.disabled = currentIndex === totalPages - 1;
 
+            // Subtitle Update
+            const cap = data.getAttribute('data-caption') || '';
+            const dia = data.getAttribute('data-dialogue') || '';
+            const speaker = data.getAttribute('data-speaker') || 'HERO';
+            if (cap || dia) {
+                let html = '';
+                if (cap) html += '<div class="sub-caption">' + cap + '</div>';
+                if (dia) html += '<div class="sub-dialogue"><span class="sub-speaker">' + speaker + '</span>“' + dia + '”</div>';
+                subBox.innerHTML = html;
+                subBox.style.display = 'block';
+            } else {
+                subBox.style.display = 'none';
+            }
+
             // Audio Logic
             audio.pause();
             audio.onended = null;
@@ -751,7 +886,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
                                 currentIndex++;
                                 update();
                             }
-                        }, 1000);
+                        }, 1200);
                     }
                 };
                 audio.play().catch(e => console.log("Audio play error", e));
