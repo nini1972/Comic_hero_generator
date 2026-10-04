@@ -508,18 +508,20 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             setIsStarted(true);
             setShowSetup(false);
             setIsTransitioning(false);
-            await generateBatch(1, INITIAL_PAGES);
-            generateBatch(3, 3);
+            // Generate pages 1, 2, and the decision page (page 3)
+            // Page 4 will ink on the open spread once the reader makes their choice on Page 3
+            await generateBatch(1, 3);
         }, 1100);
     };
 
     const handleChoice = async (pageIndex: number, choice: string) => {
         updateFaceState(`page-${pageIndex}`, { resolvedChoice: choice });
-        const maxPage = Math.max(...historyRef.current.map(f => f.pageIndex || 0));
-        if (maxPage + 1 <= TOTAL_PAGES) {
-            generateBatch(maxPage + 1, BATCH_SIZE);
+        // The choice is now recorded in history. Generate subsequent pages reflecting the decision.
+        const nextPage = pageIndex + 1;
+        if (nextPage <= TOTAL_PAGES) {
+            generateBatch(nextPage, BATCH_SIZE);
         }
-    }
+    };
 
     const resetApp = () => {
         setIsStarted(false);
@@ -588,18 +590,64 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
     <meta charset="UTF-8">
     <style>
         body { background: #000; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; -webkit-font-smoothing: antialiased; }
-        .container { position: relative; width: 100%; max-width: 600px; margin-top: 5px; background: #000; display: flex; align-items: center; justify-content: center; flex: 1; }
-        #pageImage { width: 100%; height: auto; max-height: 80vh; object-fit: contain; border-bottom: 2px solid #333; }
-        .controls { width: 100%; padding: 20px; display: flex; justify-content: center; gap: 15px; background: #111; border-top: 1px solid #333; padding-bottom: env(safe-area-inset-bottom); }
-        button { background: #ff4444; color: white; border: none; padding: 12px 25px; font-size: 1.1rem; cursor: pointer; font-weight: bold; border-radius: 12px; text-transform: uppercase; -webkit-tap-highlight-color: transparent; }
+        .container { 
+            position: relative; 
+            width: 100%; 
+            max-width: 600px; 
+            margin-top: 5px; 
+            background: #000; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            flex: 1; 
+            overflow: hidden; 
+            border-bottom: 2px solid #333;
+            border-radius: 8px;
+        }
+        #pageImage { 
+            width: 100%; 
+            height: auto; 
+            max-height: 80vh; 
+            object-fit: contain; 
+            display: block;
+            transition: opacity 0.35s ease;
+            transform-origin: center center;
+        }
+        #pageImage.fade { opacity: 0; }
+        
+        /* Ken Burns Cinematic Camera Movements */
+        .kb-push  { animation: kbPush 12s ease-out forwards; }
+        .kb-pull  { animation: kbPull 12s ease-out forwards; }
+        .kb-left  { animation: kbLeft 12s ease-out forwards; }
+        .kb-right { animation: kbRight 12s ease-out forwards; }
+
+        @keyframes kbPush  { from { transform: scale(1.0); } to { transform: scale(1.15); } }
+        @keyframes kbPull  { from { transform: scale(1.15); } to { transform: scale(1.0); } }
+        @keyframes kbLeft  { from { transform: scale(1.12) translateX(3%); } to { transform: scale(1.12) translateX(-3%); } }
+        @keyframes kbRight { from { transform: scale(1.12) translateX(-3%); } to { transform: scale(1.12) translateX(3%); } }
+
+        .controls { 
+            width: 100%; 
+            padding: 16px 20px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center;
+            gap: 12px; 
+            background: #111; 
+            border-top: 1px solid #333; 
+            padding-bottom: env(safe-area-inset-bottom, 20px); 
+        }
+        button { background: #ff4444; color: white; border: none; padding: 12px 20px; font-size: 1.05rem; cursor: pointer; font-weight: bold; border-radius: 12px; text-transform: uppercase; -webkit-tap-highlight-color: transparent; transition: all 0.2s; }
         button:active { opacity: 0.7; transform: scale(0.95); }
-        button:disabled { background: #333; color: #666; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .btn-auto { background: #2563eb; }
+        .btn-auto.active { background: #16a34a; box-shadow: 0 0 14px rgba(34, 197, 94, 0.45); }
         .page-info { font-size: 1rem; align-self: center; font-weight: bold; min-width: 90px; text-align: center; }
         h1 { font-style: italic; color: #ffd700; margin: 10px 0 5px 0; font-size: 1.2rem; text-align: center; }
         .ios-tip { font-size: 0.75rem; color: #aaa; margin: 5px 0; padding: 10px; background: #222; border-radius: 8px; margin: 0 10px 10px 10px; }
         
         #overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
-        #startBtn { font-size: 1.5rem; padding: 15px 40px; background: #22c55e; margin-top: 20px; }
+        #startBtn { font-size: 1.5rem; padding: 16px 42px; background: #22c55e; margin-top: 20px; }
         .hidden-data { display: none; }
     </style>
 </head>
@@ -608,7 +656,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         <h1 style="font-size: 2rem;">${title}</h1>
         <p>TAP BELOW TO START YOUR ADVENTURE</p>
         <button id="startBtn">PLAY STORY</button>
-        <p style="margin-top: 20px; color: #666; font-size: 0.8rem;">(Enabled audio on mobile)</p>
+        <p style="margin-top: 20px; color: #666; font-size: 0.8rem;">(Enables voice narration on mobile)</p>
     </div>
 
     <h1>${title}</h1>
@@ -622,6 +670,7 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
 
     <div class="controls">
         <button id="prevBtn">BACK</button>
+        <button id="autoBtn" class="btn-auto active">AUTO: ON</button>
         <span class="page-info">PAGE <span id="pageNum">1</span> / ${faces.length}</span>
         <button id="nextBtn">NEXT</button>
     </div>
@@ -639,26 +688,83 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         const num = document.getElementById('pageNum');
         const next = document.getElementById('nextBtn');
         const prev = document.getElementById('prevBtn');
+        const autoBtn = document.getElementById('autoBtn');
         const audio = document.getElementById('mainAudio');
         const overlay = document.getElementById('overlay');
         const startBtn = document.getElementById('startBtn');
 
+        let autoplay = true;
+        let token = 0;
+        const KB_EFFECTS = ['kb-push', 'kb-left', 'kb-pull', 'kb-right'];
+
+        function setAutoplay(state) {
+            autoplay = state;
+            if (autoplay) {
+                autoBtn.innerText = 'AUTO: ON';
+                autoBtn.classList.add('active');
+            } else {
+                autoBtn.innerText = 'AUTO: OFF';
+                autoBtn.classList.remove('active');
+            }
+        }
+
+        autoBtn.onclick = (e) => {
+            e.stopPropagation();
+            setAutoplay(!autoplay);
+            if (autoplay && audio.paused && !audio.ended) {
+                audio.play().catch(() => {});
+            }
+        };
+
         function update() {
+            const myToken = ++token;
             const data = document.getElementById('data-' + currentIndex);
+            if (!data) return;
             const sourceImg = data.querySelector('img');
             
-            // UI Update
-            img.src = sourceImg.getAttribute('data-src');
+            // Fade out and restart Ken Burns motion
+            img.classList.add('fade');
+            setTimeout(() => {
+                if (myToken !== token) return;
+                img.src = sourceImg.getAttribute('data-src');
+                img.classList.remove('fade', ...KB_EFFECTS);
+                void img.offsetWidth; // Reflow to reset CSS animation
+                img.classList.add(KB_EFFECTS[currentIndex % KB_EFFECTS.length]);
+            }, 300);
+
             num.innerText = currentIndex + 1;
             prev.disabled = currentIndex === 0;
             next.disabled = currentIndex === totalPages - 1;
 
             // Audio Logic
             audio.pause();
+            audio.onended = null;
             const audioData = data.getAttribute('data-audio');
+
             if (audioData && audioData !== '') {
                 audio.src = 'data:audio/wav;base64,' + audioData;
-                audio.play().catch(e => console.log("Audio failed", e));
+                audio.onended = () => {
+                    if (myToken !== token) return;
+                    if (autoplay && currentIndex < totalPages - 1) {
+                        setTimeout(() => {
+                            if (myToken === token && autoplay && currentIndex < totalPages - 1) {
+                                currentIndex++;
+                                update();
+                            }
+                        }, 1000);
+                    }
+                };
+                audio.play().catch(e => console.log("Audio play error", e));
+            } else {
+                // If page has no audio (e.g. cover or back cover), advance after 5s in auto mode
+                if (autoplay && currentIndex < totalPages - 1) {
+                    setTimeout(() => {
+                        if (myToken === token && autoplay && currentIndex < totalPages - 1) {
+                            currentIndex++;
+                            update();
+                        }
+                    }, 5000);
+                }
             }
         }
 
@@ -669,10 +775,23 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
             update();
         };
 
-        prev.onclick = (e) => { e.stopPropagation(); if(currentIndex > 0) { currentIndex--; update(); } };
-        next.onclick = (e) => { e.stopPropagation(); if(currentIndex < totalPages - 1) { currentIndex++; update(); } };
+        prev.onclick = (e) => { 
+            e.stopPropagation(); 
+            if (currentIndex > 0) { 
+                currentIndex--; 
+                update(); 
+            } 
+        };
 
-        update(); // Early load for image
+        next.onclick = (e) => { 
+            e.stopPropagation(); 
+            if (currentIndex < totalPages - 1) { 
+                currentIndex++; 
+                update(); 
+            } 
+        };
+
+        update(); // Early load
     </script>
 </body>
 </html>
@@ -722,6 +841,14 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
     const handleSheetClick = (index: number) => {
         if (!isStarted) return;
         if (index === 0 && currentSheetIndex === 0) return;
+
+        // Prevent flipping forward past an active decision page if the choice has not yet been resolved
+        const visibleLeftPageIndex = (currentSheetIndex * 2) - 1;
+        const visibleLeftFace = comicFaces.find(f => f.pageIndex === visibleLeftPageIndex);
+        if (index > currentSheetIndex && visibleLeftFace?.isDecisionPage && !visibleLeftFace?.resolvedChoice) {
+            return;
+        }
+
         if (index < currentSheetIndex) setCurrentSheetIndex(index);
         else if (index === currentSheetIndex && comicFaces.find(f => f.pageIndex === index)?.imageUrl) setCurrentSheetIndex(prev => prev + 1);
     };
