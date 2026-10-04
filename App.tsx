@@ -589,10 +589,12 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
 
     const handleChoice = async (pageIndex: number, choice: string) => {
         updateFaceState(`page-${pageIndex}`, { resolvedChoice: choice });
-        // The choice is now recorded in history. Generate subsequent pages reflecting the decision.
+        // The choice is now recorded in history. Generate all remaining pages through the final page and back cover!
         const nextPage = pageIndex + 1;
         if (nextPage <= TOTAL_PAGES) {
-            generateBatch(nextPage, BATCH_SIZE);
+            const nextDecision = DECISION_PAGES.find(p => p > pageIndex);
+            const count = nextDecision ? (nextDecision - nextPage + 1) : (TOTAL_PAGES - nextPage + 1);
+            generateBatch(nextPage, count);
         }
     };
 
@@ -980,12 +982,19 @@ OUTPUT STRICT JSON ONLY (No markdown formatting):
         // Prevent flipping forward past an active decision page if the choice has not yet been resolved
         const visibleLeftPageIndex = (currentSheetIndex * 2) - 1;
         const visibleLeftFace = comicFaces.find(f => f.pageIndex === visibleLeftPageIndex);
-        if (index > currentSheetIndex && visibleLeftFace?.isDecisionPage && !visibleLeftFace?.resolvedChoice) {
+        if (index >= currentSheetIndex && visibleLeftFace?.isDecisionPage && !visibleLeftFace?.resolvedChoice) {
             return;
         }
 
-        if (index < currentSheetIndex) setCurrentSheetIndex(index);
-        else if (index === currentSheetIndex && comicFaces.find(f => f.pageIndex === index)?.imageUrl) setCurrentSheetIndex(prev => prev + 1);
+        if (index < currentSheetIndex) {
+            setCurrentSheetIndex(index);
+        } else if (index === currentSheetIndex) {
+            const rightPageIndex = index === 0 ? 0 : index * 2;
+            const rightFace = comicFaces.find(f => f.pageIndex === rightPageIndex);
+            if (rightFace?.imageUrl) {
+                setCurrentSheetIndex(prev => prev + 1);
+            }
+        }
     };
 
     return (
