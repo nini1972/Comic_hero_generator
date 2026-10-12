@@ -11,6 +11,49 @@ export const GATE_PAGE = 2;
 export const BATCH_SIZE = 6;
 export const DECISION_PAGES = [3];
 
+// --- Case File mode ---
+// An alternate, non-branching story experience: a superhero incident is
+// reconstructed from a fixed sequence of mixed-format evidence artifacts
+// instead of a linear, choice-driven comic.
+export type StoryMode = 'classic' | 'case_file';
+
+export type ArtifactType =
+  | 'cover_sheet'
+  | 'emergency_calls'
+  | 'camera_footage'
+  | 'witness_drawing'
+  | 'responder_notes'
+  | 'overlooked_detail'
+  | 'hero_statement'
+  | 'closing_summary';
+
+export const CASE_FILE_SEQUENCE: ArtifactType[] = [
+  'cover_sheet',
+  'emergency_calls',
+  'camera_footage',
+  'witness_drawing',
+  'responder_notes',
+  'overlooked_detail',
+  'hero_statement',
+  'closing_summary'
+];
+
+export const CASE_FILE_MAX_STORY_PAGES = CASE_FILE_SEQUENCE.length;
+export const CASE_FILE_GATE_PAGE = 2;
+export const CASE_FILE_INITIAL_PAGES = 2;
+export const CASE_FILE_BATCH_SIZE = 6;
+
+export const ARTIFACT_LABELS: Record<ArtifactType, string> = {
+  cover_sheet: 'Incident Report',
+  emergency_calls: 'Emergency Dispatch Calls',
+  camera_footage: 'Security Camera Footage',
+  witness_drawing: "Witness's Drawing",
+  responder_notes: "Responder's Field Notes",
+  overlooked_detail: 'Overlooked Detail',
+  hero_statement: "Hero's Statement",
+  closing_summary: 'Closing Summary'
+};
+
 export const GENRES = [
   "Classic Horror",
   "Superhero Action",
@@ -60,6 +103,8 @@ export interface ComicFace {
   isLoading: boolean;
   pageIndex?: number;
   isDecisionPage?: boolean;
+  artifactType?: ArtifactType;
+  audioBase64?: string;
 }
 
 export interface Beat {
@@ -68,6 +113,8 @@ export interface Beat {
   scene: string;
   choices: string[];
   focus_char: 'hero' | 'friend' | 'other';
+  sourceLabel?: string;
+  timestamp?: string;
 }
 
 export interface Persona {
