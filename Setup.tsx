@@ -5,7 +5,7 @@
 */
 
 import React, { useState, useEffect } from 'react';
-import { GENRES, LANGUAGES, Persona } from './types';
+import { GENRES, LANGUAGES, Persona, StoryMode } from './types';
 
 interface SetupProps {
     show: boolean;
@@ -16,12 +16,14 @@ interface SetupProps {
     selectedLanguage: string;
     customPremise: string;
     richMode: boolean;
+    storyMode: StoryMode;
     onHeroUpload: (file: File) => void;
     onFriendUpload: (file: File) => void;
     onGenreChange: (val: string) => void;
     onLanguageChange: (val: string) => void;
     onPremiseChange: (val: string) => void;
     onRichModeChange: (val: boolean) => void;
+    onStoryModeChange: (val: StoryMode) => void;
     onLaunch: () => void;
 }
 
@@ -163,6 +165,25 @@ export const Setup: React.FC<SetupProps> = (props) => {
                         <div className="bg-yellow-50 p-3 border-4 border-black h-full flex flex-col justify-between">
                             <div>
                                 <div className="mb-2">
+                                    <p className="font-comic text-base mb-1 font-bold text-gray-800">STORY MODE</p>
+                                    <div className="grid grid-cols-2 gap-1">
+                                        <button type="button" onClick={() => props.onStoryModeChange('classic')}
+                                            className={`font-comic text-sm md:text-base uppercase p-2 border-2 border-black shadow-[3px_3px_0px_rgba(0,0,0,0.2)] transition-all ${props.storyMode === 'classic' ? 'bg-yellow-400 text-black' : 'bg-white text-black hover:bg-yellow-50'}`}>
+                                            Classic Comic
+                                        </button>
+                                        <button type="button" onClick={() => props.onStoryModeChange('case_file')}
+                                            className={`font-comic text-sm md:text-base uppercase p-2 border-2 border-black shadow-[3px_3px_0px_rgba(0,0,0,0.2)] transition-all ${props.storyMode === 'case_file' ? 'bg-yellow-400 text-black' : 'bg-white text-black hover:bg-yellow-50'}`}>
+                                            Case File
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-600 mt-1 leading-snug">
+                                        {props.storyMode === 'case_file'
+                                            ? "Reconstruct one incident from witness accounts and evidence. No choices \u2014 just the full picture, grounded and human."
+                                            : "A choice-driven superhero adventure, page by page."}
+                                    </p>
+                                </div>
+
+                                <div className="mb-2">
                                     <p className="font-comic text-base mb-1 font-bold text-gray-800">GENRE</p>
                                     <select value={props.selectedGenre} onChange={(e) => props.onGenreChange(e.target.value)} className="w-full font-comic text-lg p-1 border-2 border-black uppercase bg-white text-black cursor-pointer shadow-[3px_3px_0px_rgba(0,0,0,0.2)] focus:outline-none focus:translate-x-[1px] focus:translate-y-[1px] focus:shadow-none transition-all">
                                         {GENRES.map(g => <option key={g} value={g} className="text-black">{g}</option>)}
@@ -193,7 +214,7 @@ export const Setup: React.FC<SetupProps> = (props) => {
                 </div>
 
                 <button onClick={props.onLaunch} disabled={!props.hero || props.isTransitioning} className="comic-btn bg-red-600 text-white text-3xl px-6 py-3 w-full hover:bg-red-500 disabled:bg-gray-400 disabled:cursor-not-allowed uppercase tracking-wider">
-                    {props.isTransitioning ? 'LAUNCHING...' : 'START ADVENTURE!'}
+                    {props.isTransitioning ? 'LAUNCHING...' : (props.storyMode === 'case_file' ? 'OPEN THE CASE FILE' : 'START ADVENTURE!')}
                 </button>
             </div>
           </div>
