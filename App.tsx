@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import jsPDF from 'jspdf';
 import {
@@ -21,6 +21,7 @@ import { ApiKeyDialog } from './ApiKeyDialog';
 const MODEL_V3 = "gemini-3-pro-image-preview";
 const MODEL_IMAGE_GEN_NAME = MODEL_V3;
 const MODEL_TEXT_NAME = MODEL_V3;
+const MODEL_AUDIO_NAME = "gemini-2.5-flash-preview-tts";
 
 // --- Case File mode constants ---
 // Only artifacts that visually depict the hero need the hero reference image.
@@ -48,6 +49,18 @@ const CASE_FILE_IMAGE_STYLE: Record<ArtifactType, string> = {
     closing_summary: "TYPE: A final assembled timeline page in the case file, combining a brief typed summary with small thumbnail-style callbacks to the earlier evidence. STYLE: Understated, documentary, NOT a dramatic splash page. No decision prompt, no cliffhanger text."
 };
 
+// Per-artifact voice + delivery style for Case File narration.
+const CASE_FILE_VOICE_CONFIG: Record<ArtifactType, { voice: string; style: string }> = {
+    cover_sheet: { voice: 'Charon', style: 'a flat, official report-reading voice' },
+    emergency_calls: { voice: 'Aoede', style: 'a stressed 911 caller on a bad connection, urgent but strained' },
+    camera_footage: { voice: 'Charon', style: 'a terse analyst narrating security footage' },
+    witness_drawing: { voice: 'Aoede', style: "a young child's innocent, simple voice" },
+    responder_notes: { voice: 'Charon', style: 'a clipped, clinical field-report voice' },
+    overlooked_detail: { voice: 'Kore', style: 'a tired, matter-of-fact voice reading a routine memo' },
+    hero_statement: { voice: 'Kore', style: 'a quiet, grounded, first-person voice with no bravado' },
+    closing_summary: { voice: 'Charon', style: 'a calm, documentary narrator' }
+};
+
 const App: React.FC = () => {
     // --- API Key Hook ---
     const { validateApiKey, setShowApiKeyDialog, showApiKeyDialog, handleApiKeyDialogContinue } = useApiKey();
@@ -60,6 +73,8 @@ const App: React.FC = () => {
     const [storyTone, setStoryTone] = useState(TONES[0]);
     const [richMode, setRichMode] = useState(true);
     const [storyMode, setStoryMode] = useState<StoryMode>('classic');
+    const [narrationEnabled, setNarrationEnabled] = useState(true);
+    const [isNarrating, setIsNarrating] = useState(false);
 
     // --- Mode-aware page structure ---
     // Case File mode replaces the linear 10-page comic with a fixed sequence
@@ -411,6 +426,88 @@ OUTPUT STRICT JSON ONLY (no markdown):
         }
     };
 
+    const wrapInWav = (base64Pcm: string): string => {
+        const pcmData = atob(base64Pcm);
+        const dataLength = pcmData.length;
+        const header = new ArrayBuffer(44);
+        const view = new DataView(header);
+
+        /* RIFF identifier */
+        view.setUint32(0, 0x52494646, false); // "RIFF"
+        /* file length */
+        view.setUint32(4, 36 + dataLength, true);
+        /* RIFF type */
+        view.setUint32(8, 0x57415645, false); // "WAVE"
+        /* format chunk identifier */
+        view.setUint32(12, 0x666d7420, false); // "fmt "
+        /* format chunk length */
+        view.setUint32(16, 16, true);
+        /* sample format (raw) */
+        view.setUint16(20, 1, true);
+        /* channel count */
+        view.setUint16(22, 1, true);
+        /* sample rate */
+        view.setUint32(24, 24000, true);
+        /* byte rate (sample rate * block align) */
+        view.setUint32(28, 48000, true);
+        /* block align (channel count * bytes per sample) */
+        view.setUint16(32, 2, true);
+        /* bits per sample */
+        view.setUint16(34, 16, true);
+        /* data chunk identifier */
+        view.setUint32(36, 0x64617461, false); // "data"
+        /* data chunk length */
+        view.setUint32(40, dataLength, true);
+
+        const headerBlob = new Uint8Array(header);
+        const pcmBlob = new Uint8Array(dataLength);
+        for (let i = 0; i < dataLength; i++) {
+            pcmBlob[i] = pcmData.charCodeAt(i);
+        }
+
+        const combined = new Uint8Array(44 + dataLength);
+        combined.set(headerBlob);
+        combined.set(pcmBlob, 44);
+
+        // Convert byte array back to base64
+        let binary = '';
+        const len = combined.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(combined[i]);
+        }
+        return btoa(binary);
+    };
+
+    const generateAudio = async (text: string, voiceName: string = 'Kore', styleInstruction: string = 'an expressive, dramatic voice'): Promise<string> => {
+        if (!text) return '';
+        try {
+            const ai = getAI();
+            const response = await ai.models.generateContent({
+                model: MODEL_AUDIO_NAME,
+                contents: [{ parts: [{ text: `Recite this line in ${styleInstruction}: "${text}"` }] }],
+                config: {
+                    responseModalities: ['AUDIO'],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: {
+                                voiceName: voiceName // Options: Kore, Charon, Aoede, etc.
+                            },
+                        },
+                    },
+                },
+            });
+
+            const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (!data) return '';
+
+            // Wrap the raw 24kHz PCM data in a WAV container for the browser
+            return wrapInWav(data);
+        } catch (e) {
+            console.error("Audio generation failed", e);
+            return '';
+        }
+    };
+
     const updateFaceState = (id: string, updates: Partial<ComicFace>) => {
         setComicFaces(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
         const idx = historyRef.current.findIndex(f => f.id === id);
@@ -480,6 +577,58 @@ OUTPUT STRICT JSON ONLY (no markdown):
         }
     }
 
+    // --- Narration Background Queue ---
+    // Generates one audio clip at a time for pages whose image/text is ready,
+    // so narration never blocks page generation. Voice/style differs for
+    // Case File artifacts (grounded, per-artifact delivery) vs Classic Comic
+    // (expressive comic narration).
+    useEffect(() => {
+        if (!narrationEnabled || !isStarted || isNarrating) return;
+
+        const processNextNarration = async () => {
+            const nextFace = comicFaces.find(f =>
+                f.imageUrl &&
+                (f.narrative?.caption || f.narrative?.dialogue) &&
+                !f.audioBase64 &&
+                f.type !== 'cover' &&
+                f.type !== 'back_cover'
+            );
+
+            if (!nextFace) return;
+
+            setIsNarrating(true);
+            try {
+                const caption = nextFace.narrative?.caption || '';
+                let fullText: string;
+                let voiceName: string;
+                let styleInstruction: string;
+
+                if (isCaseFile && nextFace.artifactType) {
+                    const cfg = CASE_FILE_VOICE_CONFIG[nextFace.artifactType];
+                    const dialogue = nextFace.narrative?.dialogue ? ` ${nextFace.narrative.dialogue}` : '';
+                    fullText = `${caption}${dialogue}`.trim();
+                    voiceName = cfg.voice;
+                    styleInstruction = cfg.style;
+                } else {
+                    const dialogue = nextFace.narrative?.dialogue ? ` ${nextFace.narrative.focus_char === 'hero' ? 'The hero says: ' : 'The co-star says: '}${nextFace.narrative.dialogue}` : '';
+                    fullText = `${caption}${dialogue}`.trim();
+                    voiceName = 'Kore';
+                    styleInstruction = 'an expressive, dramatic comic-narration voice';
+                }
+
+                const audio = await generateAudio(fullText, voiceName, styleInstruction);
+                updateFaceState(nextFace.id, { audioBase64: audio || 'FAILED' });
+            } catch (e) {
+                console.error("Narration queue error:", e);
+                updateFaceState(nextFace.id, { audioBase64: 'FAILED' });
+            } finally {
+                setIsNarrating(false);
+            }
+        };
+
+        processNextNarration();
+    }, [comicFaces, narrationEnabled, isStarted, isNarrating, isCaseFile]);
+
     const launchStory = async () => {
         // --- API KEY VALIDATION ---
         const hasKey = await validateApiKey();
@@ -539,6 +688,7 @@ OUTPUT STRICT JSON ONLY (no markdown):
         generatingPages.current.clear();
         setHero(null);
         setFriend(null);
+        setIsNarrating(false);
     };
 
     const downloadPDF = () => {
@@ -582,6 +732,7 @@ OUTPUT STRICT JSON ONLY (no markdown):
                 customPremise={customPremise}
                 richMode={richMode}
                 storyMode={storyMode}
+                narrationEnabled={narrationEnabled}
                 onHeroUpload={handleHeroUpload}
                 onFriendUpload={handleFriendUpload}
                 onGenreChange={setSelectedGenre}
@@ -589,6 +740,7 @@ OUTPUT STRICT JSON ONLY (no markdown):
                 onPremiseChange={setCustomPremise}
                 onRichModeChange={setRichMode}
                 onStoryModeChange={setStoryMode}
+                onNarrationChange={setNarrationEnabled}
                 onLaunch={launchStory}
             />
 

@@ -104,6 +104,7 @@ export interface ComicFace {
   pageIndex?: number;
   isDecisionPage?: boolean;
   artifactType?: ArtifactType;
+  audioBase64?: string;
 }
 
 export interface Beat {

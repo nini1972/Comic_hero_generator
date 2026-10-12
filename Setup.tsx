@@ -17,6 +17,7 @@ interface SetupProps {
     customPremise: string;
     richMode: boolean;
     storyMode: StoryMode;
+    narrationEnabled: boolean;
     onHeroUpload: (file: File) => void;
     onFriendUpload: (file: File) => void;
     onGenreChange: (val: string) => void;
@@ -24,6 +25,7 @@ interface SetupProps {
     onPremiseChange: (val: string) => void;
     onRichModeChange: (val: boolean) => void;
     onStoryModeChange: (val: StoryMode) => void;
+    onNarrationChange: (val: boolean) => void;
     onLaunch: () => void;
 }
 
@@ -208,6 +210,11 @@ export const Setup: React.FC<SetupProps> = (props) => {
                             <label className="flex items-center gap-2 font-comic text-base cursor-pointer text-black mt-1 p-1 hover:bg-yellow-100 rounded border-2 border-transparent hover:border-yellow-300 transition-colors">
                                 <input type="checkbox" checked={props.richMode} onChange={(e) => props.onRichModeChange(e.target.checked)} className="w-4 h-4 accent-black" />
                                 <span className="text-black">NOVEL MODE (Rich Dialogue)</span>
+                            </label>
+
+                            <label className="flex items-center gap-2 font-comic text-base cursor-pointer text-black mt-1 p-1 hover:bg-yellow-100 rounded border-2 border-transparent hover:border-yellow-300 transition-colors">
+                                <input type="checkbox" checked={props.narrationEnabled} onChange={(e) => props.onNarrationChange(e.target.checked)} className="w-4 h-4 accent-black" />
+                                <span className="text-black">VOICE NARRATION{props.storyMode === 'case_file' ? ' (Spoken Evidence)' : ''}</span>
                             </label>
                         </div>
                     </div>
