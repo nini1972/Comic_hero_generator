@@ -132,7 +132,7 @@ export class OfflineStory implements StorySource {
 
 // ---------- Gemini: beats written live, with continuity from the world ----------
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.8-flash';
 
 const extractJson = (text: string): unknown => {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
