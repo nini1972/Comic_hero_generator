@@ -174,7 +174,7 @@ export class GeminiStory implements StorySource {
   constructor(private readonly apiKey: string, private readonly genre: string = 'Superhero Action') {}
 
   private async ask(prompt: string): Promise<StoryBeat> {
-    const ai = new GoogleGenAI({ apiKey: this.apiKey });
+    const ai = new GoogleGenAI({ apiKey: this.apiKey, apiVersion: 'v1beta' });
     const res = await ai.models.generateContent({ model: MODEL, contents: prompt, config: { responseMimeType: 'application/json' } });
     return asBeat(extractJson(res.text ?? ''));
   }
