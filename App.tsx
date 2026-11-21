@@ -21,7 +21,7 @@ import { ApiKeyDialog } from './ApiKeyDialog';
 const MODEL_V3 = "gemini-3-pro-image-preview";
 const MODEL_IMAGE_GEN_NAME = MODEL_V3;
 const MODEL_TEXT_NAME = MODEL_V3;
-const MODEL_AUDIO_NAME = "gemini-2.5-flash-preview-tts";
+const MODEL_AUDIO_NAME = "gemini-3.8-flash-tts";
 
 // --- Case File mode constants ---
 // Only artifacts that visually depict the hero need the hero reference image.
@@ -107,7 +107,7 @@ const App: React.FC = () => {
     // --- AI Helpers ---
     // Helper to always get a fresh instance with the selected key
     const getAI = () => {
-        return new GoogleGenAI({ apiKey: process.env.API_KEY });
+        return new GoogleGenAI({ apiKey: process.env.API_KEY, apiVersion: 'v1beta' });
     };
 
     const handleAPIError = (e: any) => {
@@ -482,26 +482,31 @@ OUTPUT STRICT JSON ONLY (no markdown):
         if (!text) return '';
         try {
             const ai = getAI();
-            const response = await ai.models.generateContent({
+            const interaction = await ai.interactions.create({
                 model: MODEL_AUDIO_NAME,
-                contents: [{ parts: [{ text: `Recite this line in ${styleInstruction}: "${text}"` }] }],
-                config: {
-                    responseModalities: ['AUDIO'],
-                    speechConfig: {
-                        voiceConfig: {
-                            prebuiltVoiceConfig: {
-                                voiceName: voiceName // Options: Kore, Charon, Aoede, etc.
-                            },
-                        },
-                    },
+                input: [{
+                    type: 'user_input',
+                    content: [{
+                        type: 'text',
+                        text,
+                        annotations: [{
+                            type: 'speech_metadata',
+                            style: styleInstruction,
+                        }],
+                    }],
+                }],
+                response_format: { type: 'audio' },
+                generation_config: {
+                    speech_config: [{ voice: voiceName }],
                 },
             });
 
-            const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            const data = interaction.output_audio?.data;
             if (!data) return '';
 
-            // Wrap the raw 24kHz PCM data in a WAV container for the browser
-            return wrapInWav(data);
+            // Unary gemini-3.8-flash-tts returns complete audio/wav (RIFF header).
+            // Only wrap in a WAV container if headerless PCM was returned.
+            return atob(data.slice(0, 8)).startsWith('RIFF') ? data : wrapInWav(data);
         } catch (e) {
             console.error("Audio generation failed", e);
             return '';
